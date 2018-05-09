@@ -350,15 +350,40 @@ class Assignment:
         if self._done:
             self._capability.jobDone( system )
 
+class MemberFactory:
+
+    def __init__( self ):
+        self._members = []
+        self._capabilities = {}
+
+    def new( self, jmember ):
+        id = jmember[ "ID" ]
+        capability = id in self._capabilities and self._capabilities[ id ]
+        member = (
+            dict(
+                Developer=Developer,
+                QA=QA,
+                Ops=Ops
+            )[ jmember[ "Role" ] ]( name=id, capability=capability )        
+        )
+        if not capability:
+            self._capabilities[ id ] = member
+        self._members.append( member )
+
+    def members( self ):
+        return self._members
+
+    def load( self, jmembers ):
+        for m in jmembers:
+            self.new( m )        
+        return self.members()
+
 
 class Team:
 
     def __init__( self, args ):
         self._args = args
-        alpha1 = Developer( name='Alpha' )
-        beta2 = QA( name='Beta' )
-        alpha3 = Ops( capability=alpha1 )
-        self._members = [ alpha1, beta2, alpha3 ]
+        self._members = MemberFactory().load( json.load( args.team ) )
 
     def __iter__( self ):
         return iter( self._members )
@@ -440,6 +465,7 @@ class Main:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument( "--backlog", type=argparse.FileType('r'), default='backlog.json', help="Backlog in JSON format" )
+    parser.add_argument( "--team", type=argparse.FileType('r'), default='team.json', help="Team in JSON format" )
     # parser.add_argument( "--full", action='store_true', default=False, help="Scan all possible values" )
     # parser.add_argument( "--fuzz", type=int, default=0, help="Fuzztest N values" )
     # parser.add_argument( "--exactonly", action='store_true', default=False, help="Exclude non-exact triples" )    

@@ -1,0 +1,14 @@
+[
+	{
+		"ID": "Alpha",
+		"Role": "Developer"
+	},
+	{
+		"ID": "Beta",
+		"Role": "QA"
+	},
+	{
+		"ID": "Alpha",
+		"Role": "Ops"
+	}
+]
