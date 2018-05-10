@@ -179,7 +179,7 @@ class Capability:
 
     category = 'Staff'
 
-    def __init__( self, name=None, capability=None ):
+    def __init__( self, name=None, capability=None, productivity=1 ):
         self._mots = None
         if name:
             self._mots = MemberOfTechnicalStaff( name )
@@ -187,6 +187,7 @@ class Capability:
             self._mots = capability._mots
         if not self._mots:
             raise Exception( 'Invalid initial parameters' )
+        self._productivity = productivity
         self._on_story = None
         self._mots.add( self )
 
@@ -207,7 +208,7 @@ class Capability:
         return '{}({})'.format( self.name(), self.category )
 
     def productivity( self ):
-        return 1
+        return self._productivity
 
     def assignStoryFromBacklog( self, backlog, system ):
         pick = None
@@ -359,12 +360,13 @@ class MemberFactory:
     def new( self, jmember ):
         id = jmember[ "ID" ]
         capability = id in self._capabilities and self._capabilities[ id ]
+        productivity = "Productivity" in jmember and jmember[ "Productivity" ] or 1
         member = (
             dict(
                 Developer=Developer,
                 QA=QA,
                 Ops=Ops
-            )[ jmember[ "Role" ] ]( name=id, capability=capability )        
+            )[ jmember[ "Role" ] ]( name=id, capability=capability, productivity=1 )
         )
         if not capability:
             self._capabilities[ id ] = member
