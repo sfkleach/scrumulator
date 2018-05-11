@@ -1,14 +1,16 @@
 [
 	{
 		"ID": "Alpha",
+		"Role": "Ops",
+		"Available": [ 5 ]
+	},
+	{
+		"ID": "Alpha",
 		"Role": "Developer"
 	},
 	{
 		"ID": "Beta",
-		"Role": "QA"
-	},
-	{
-		"ID": "Alpha",
-		"Role": "Ops"
+		"Role": "QA",
+		"Available": [ 2, 3, 4 ]
 	}
 ]

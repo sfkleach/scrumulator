@@ -18,8 +18,15 @@ new -> ready -> active -> resolved -> deployed-> closed -> good -> live
 
 class Journal:
 
+    def __init__( self ):
+        self._indent = 0
+
     def print( self, *args, **kwargs ):
-        print( 'JOURNAL', *args, **kwargs )
+        print( 'JOURNAL', '    '*self._indent, *args, **kwargs )
+
+    def indent( self, n ):
+        self._indent += n
+
 
 J = Journal()
 
@@ -179,20 +186,24 @@ class Capability:
 
     category = 'Staff'
 
-    def __init__( self, name=None, capability=None, productivity=1 ):
+    def __init__( self, name=None, capability=None, productivity=1, available=[1,2,3,4,5] ):
         self._mots = None
         if name:
             self._mots = MemberOfTechnicalStaff( name )
-        if capability:
-            self._mots = capability._mots
         if not self._mots:
             raise Exception( 'Invalid initial parameters' )
+        if capability:
+            self._mots = capability._mots
         self._productivity = productivity
         self._on_story = None
         self._mots.add( self )
+        self._available = available
 
     def name( self ):
         return self._mots.name()
+
+    def isAvailable( self, dayOfWeek ):
+        return dayOfWeek in self._available
 
     def isOnStory( self ):
         return bool( self._on_story )
@@ -210,36 +221,43 @@ class Capability:
     def productivity( self ):
         return self._productivity
 
-    def assignStoryFromBacklog( self, backlog, system ):
+    def assignStoryFromBacklog( self, backlog, system, dryRun=False ):
         pick = None
         for story in backlog.findStories( test_status=self.acceptStatus ):
             if self.areResourcesAvailable( system ):
                 if not pick or story.pickMeBefore( pick ):
                     pick = story
-        if pick:
+        if pick and not( dryRun ):
             self.reserveResources( system )
             self.setOnStory( story = pick )
             pick.assignTo( self )
-            return pick
+        return pick
         
-    def grabNextStory( self, backlog, system ):
+    def grabNextStory( self, backlog, system, dryRun=False ):
         story = self.onStory()
         if story:
             return story
         if self._mots.isBusy():
             return None
-        story = self.assignStoryFromBacklog( backlog, system )
+        story = self.assignStoryFromBacklog( backlog, system, dryRun=dryRun )
         if story:
             return story
 
-    def progressOneHour( self, story ):
-        next_status = self.nextStatus( story.currentStatus() )
-        story.progress( self.productivity(), next_status )
-        # print( 'Compare', story._status, next_status )
-        if story.hasStatus( next_status ):
-            J.print( '{} completes work on "{}"'.format( self, story ) )
-            return True
-        return False
+    def relatedStories( self, backlog ):
+        return ()
+
+    def progressOneHour( self, main_story, backlog=None ):
+        done = True
+        related = [ story for story in self.relatedStories( backlog ) if story != main_story ]
+        for story in [ main_story, *related ]:
+            next_status = self.nextStatus( story.currentStatus() )
+            story.progress( self.productivity(), next_status )
+            # print( 'Compare', story._status, next_status )
+            if story.hasStatus( next_status ):
+                J.print( '{} completes work on "{}"'.format( self, story ) )
+            else:
+                done = False
+        return done
 
     def jobDone( self, system ):
         self.setOnStory( story = None )
@@ -284,6 +302,11 @@ class Ops( Capability ):
 
     def __init__( self, **kwargs ):
         super().__init__( **kwargs )
+
+    def relatedStories( self, backlog ):
+        for story in backlog:
+            if self.acceptStatus( story.currentStatus() ):
+                yield story
 
     def acceptStatus( self, x ):
         return x == 'resolved'
@@ -339,13 +362,16 @@ class Assignment:
     def markWorkAsDone( self ):
         self._done = True
 
-    def grabNextStory( self ):
-        story = self._capability.grabNextStory( self._backlog, self._system )
+    def isAvailable( self, dayOfWeek ):
+        return self._capability.isAvailable( dayOfWeek )
+
+    def grabNextStory( self, dryRun=False ):
+        story = self._capability.grabNextStory( self._backlog, self._system, dryRun=dryRun )
         self._story = story 
         return story
 
     def progressOneHour( self ):
-        self._done = self._capability.progressOneHour( self._story )
+        self._done = self._capability.progressOneHour( self._story, backlog=self._backlog )
 
     def endOfHour( self, system ):
         if self._done:
@@ -360,13 +386,14 @@ class MemberFactory:
     def new( self, jmember ):
         id = jmember[ "ID" ]
         capability = id in self._capabilities and self._capabilities[ id ]
-        productivity = "Productivity" in jmember and jmember[ "Productivity" ] or 1
+        productivity = jmember[ "Productivity" ] if "Productivity" in jmember else 1
+        available = jmember[ "Available" ] if "Available" in jmember else (1,2,3,4,5)
         member = (
             dict(
                 Developer=Developer,
                 QA=QA,
                 Ops=Ops
-            )[ jmember[ "Role" ] ]( name=id, capability=capability, productivity=1 )
+            )[ jmember[ "Role" ] ]( name=id, available=available, capability=capability, productivity=1 )
         )
         if not capability:
             self._capabilities[ id ] = member
@@ -390,8 +417,9 @@ class Team:
     def __iter__( self ):
         return iter( self._members )
 
-    def __str__( self ):
-        return ', '.join( str( x ) for x in self._members )
+    def show( self ):
+        for member in self:
+            J.print( member )
 
 class DevQASystem:
 
@@ -407,6 +435,9 @@ class DevQASystem:
     def isSystemAvailable( self ):
         return self._available
 
+def dayOfWeek( dayNumber ):
+    return [ 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat' ][ dayNumber % 7 ]
+
 class Scrumulation:
 
     def __init__( self, team, backlog, system ):
@@ -414,27 +445,35 @@ class Scrumulation:
         self._backlog = backlog
         self._system = system
 
-    def scrumulateOneHour( self ):
+    def scrumulateOneHour( self, dayOfWeek ):
         assignments = []
+        progress_possible = False
         for cap in self._team:
             A = Assignment( cap, self._backlog, self._system )
-            if A.grabNextStory():
-                assignments.append( A )
+            available = A.isAvailable( dayOfWeek )
+            story = A.grabNextStory( dryRun=not(available) )
+            if story:
+                progress_possible = True
+                if available:
+                    assignments.append( A )
         for assignment in assignments:
             assignment.progressOneHour()
         for assignment in assignments:
             assignment.endOfHour( self._system )
-        return bool( assignments )
+        return progress_possible
 
     def scrumlate( self ):
-        count = 0
+        day_number = 0
         while True:
-            count += 1
-            for hour in range( 1, 8 ):
-                if not self.scrumulateOneHour():
-                    return
-            J.print( '--- Day', count, 'Hour', hour ) 
-            self._backlog.show()
+            day_number += 1
+            day_of_week = day_number % 7
+            if 1 <= day_of_week <= 5:
+                J.print( '--- Begin Day {} ({})'.format( day_number, dayOfWeek( day_number ) ) )
+                for hour in range( 1, 8 ):
+                    if not self.scrumulateOneHour( day_of_week ):
+                        return
+                J.print( '--- Summary of Day {} ({})'.format( day_number, dayOfWeek( day_number ) ) )
+                self._backlog.show()
 
 class Main:
 
@@ -449,20 +488,22 @@ class Main:
         self._scrumlation = Scrumulation( self._team, self._backlog, self._system )
         self._scrumlation.scrumlate()
 
-    def ruler( self ):
-        J.print( '-' *  80 )
-
     def run( self ):
-        J.print( 'Scrumulation initial conditions' )
+        J.print( '--- Scrumulation initial conditions --------------------' )
+        J.print( 'Backlog' )
+        J.indent( 1 )
         self._backlog.show()
-        self.ruler()
-        J.print( self._team )
-        J.print( 'Begin scrumulation' )
+        J.indent( -1 )
+        J.print( 'Team' )
+        J.indent( 1 )
+        self._team.show()
+        J.indent( -1 )
+        J.print( '--- Begin scrumulation ---------------------------------' )
         self.scrumlate()
-        self.ruler()
+        J.print( '--- End scrumulation -----------------------------------' )
         self._backlog.show()
-        J.print( 'End scrumulation' )
-
+        J.print( '--------------------------------------------------------' )
+        
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
